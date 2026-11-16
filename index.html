@@ -15,6 +15,7 @@ body{background:var(--bg);color:var(--text);font-family:ui-monospace,"SF Mono",M
 .box{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
 .label{font-size:10px;letter-spacing:.22em;color:var(--dim);margin-bottom:6px}
 .val{font-size:20px;font-weight:700;font-variant-numeric:tabular-nums}
+.val.sm{font-size:14px;transition:color .4s}
 .mini{width:100%;height:auto;display:block}
 #boardWrap{position:relative;height:min(600px,calc(100vh - 32px));aspect-ratio:1/2}
 #board{width:100%;height:100%;display:block;border-radius:10px;border:1px solid var(--line);background:rgba(6,5,22,.72);
@@ -40,6 +41,7 @@ body{background:var(--bg);color:var(--text);font-family:ui-monospace,"SF Mono",M
   .box{padding:6px;border-radius:9px}
   .label{font-size:8px;letter-spacing:.12em}
   .val{font-size:13px}
+  .val.sm{font-size:10px}
   .help,#novaHint{display:none}
   #boardWrap{height:min(calc(100vh - 144px),calc((100vw - 160px)*2))}
   #touch{display:grid;position:fixed;left:8px;right:8px;bottom:10px;z-index:2;grid-template-columns:repeat(4,1fr);gap:8px}
@@ -57,6 +59,7 @@ body{background:var(--bg);color:var(--text);font-family:ui-monospace,"SF Mono",M
     <div class="box"><div class="label">BEST</div><div class="val" id="best">0</div></div>
     <div class="box"><div class="label">SECTOR</div><div class="val" id="level">1</div></div>
     <div class="box"><div class="label">LINES</div><div class="val" id="lines">0</div></div>
+    <div class="box"><div class="label">THEME</div><div class="val sm" id="theme">Nebula</div></div>
   </div>
   <div id="boardWrap">
     <canvas id="board"></canvas>
@@ -94,7 +97,23 @@ const SHAPES = {
   L: [[0,0,1],[1,1,1],[0,0,0]],
   C: [[1]] // comet
 };
-const COLORS = { I:'#4de8ff', O:'#ffe066', T:'#c77dff', S:'#5cff9d', Z:'#ff5c8a', J:'#6c8cff', L:'#ffa45c', C:'#ffffff' };
+// Each line clear shifts the whole galaxy to the next theme: palette, block texture and sky.
+const THEMES = [
+  { name:'Nebula',    hue:220, style:'gloss',  board:'rgba(20,10,60,.25)', colors:{ I:'#4de8ff', O:'#ffe066', T:'#c77dff', S:'#5cff9d', Z:'#ff5c8a', J:'#6c8cff', L:'#ffa45c' } },
+  { name:'Ember',     hue:12,  style:'ember',  board:'rgba(60,10,0,.3)',   colors:{ I:'#ffd23f', O:'#ff9f1c', T:'#ff4d00', S:'#ffb347', Z:'#e63946', J:'#ff6b35', L:'#f7c548' } },
+  { name:'Glacier',   hue:195, style:'glass',  board:'rgba(0,40,70,.3)',   colors:{ I:'#e0fbff', O:'#a8e6ff', T:'#7fd1ff', S:'#b8f2e6', Z:'#9ab8ff', J:'#5fa8ff', L:'#c9e4ff' } },
+  { name:'Synthwave', hue:300, style:'wire',   board:'rgba(40,0,50,.35)',  colors:{ I:'#00f0ff', O:'#fffb00', T:'#ff00e6', S:'#39ff14', Z:'#ff2079', J:'#7a5cff', L:'#ff8c00' } },
+  { name:'Candy',     hue:330, style:'stripe', board:'rgba(70,20,50,.3)',  colors:{ I:'#8fe3ff', O:'#fff07a', T:'#e7a6ff', S:'#a6ffcb', Z:'#ff9ccf', J:'#a3b8ff', L:'#ffc29e' } },
+  { name:'Retro',     hue:130, style:'pixel',  board:'rgba(0,40,10,.35)',  colors:{ I:'#6bff8a', O:'#c6ff6b', T:'#3ddc84', S:'#9effa9', Z:'#2fbf71', J:'#57e389', L:'#b8f28b' } },
+  { name:'Midas',     hue:42,  style:'metal',  board:'rgba(50,35,0,.3)',   colors:{ I:'#f9e79f', O:'#ffd700', T:'#e6b422', S:'#f0c75e', Z:'#d4a017', J:'#c9a227', L:'#ffe08a' } },
+];
+let themeIdx = 0, theme = THEMES[0], themeFlash = 0;
+const col = t => t === 'C' ? '#ffffff' : theme.colors[t];
+function shade(hex, f) {
+  const n = parseInt(hex.slice(1), 16), t = f < 0 ? 0 : 255, p = Math.abs(f);
+  const m = v => Math.round((t - v) * p + v);
+  return `rgb(${m(n >> 16)},${m(n >> 8 & 255)},${m(n & 255)})`;
+}
 const KICKS = [[0,0],[-1,0],[1,0],[0,-1],[-2,0],[2,0],[-1,-1],[1,-1]];
 
 // ---------- state ----------
@@ -160,6 +179,7 @@ const grounded = () => collide(piece.m, piece.x, piece.y + 1);
 function reset() {
   grid = Array.from({ length: ROWS }, () => Array(COLS).fill(null));
   queue = []; bag = []; sinceComet = 0; hold = null; canHold = true;
+  themeIdx = 0; theme = THEMES[0];
   score = 0; lines = 0; level = 1; combo = -1; nova = 0;
   parts.length = 0; texts.length = 0; rings.length = 0;
   fillQueue(); spawn(); hud();
@@ -194,7 +214,7 @@ function hardDrop() {
   score += d * 2;
   for (let r = 0; r < piece.m.length; r++) for (let c = 0; c < piece.m[r].length; c++)
     if (piece.m[r][c]) for (let k = 0; k < 2; k++)
-      parts.push({ x: (piece.x + c + Math.random()) * CELL, y: (piece.y + r) * CELL, vx: 0, vy: -.05 - Math.random() * .1, life: 1, decay: .003, color: COLORS[piece.type], size: 2 });
+      parts.push({ x: (piece.x + c + Math.random()) * CELL, y: (piece.y + r) * CELL, vx: 0, vy: -.05 - Math.random() * .1, life: 1, decay: .003, color: col(piece.type), size: 2 });
   shake = Math.max(shake, 3);
   lock();
 }
@@ -210,7 +230,7 @@ function lock() {
     for (let r = 0; r < m.length; r++) for (let c = 0; c < m[r].length; c++) {
       if (!m[r][c]) continue;
       if (y + r < 0) { gameOver(); return; }
-      grid[y + r][x + c] = COLORS[type];
+      grid[y + r][x + c] = type;
     }
     tone(98, .1, 'triangle', .1, .6);
   }
@@ -233,7 +253,7 @@ function explode(cx, cy) {
     if (Math.abs(dx) + Math.abs(dy) > 2) continue;
     const x = cx + dx, y = cy + dy;
     if (x < 0 || x >= COLS || y < 0 || y >= ROWS) continue;
-    if (grid[y][x]) { burst(x, y, grid[y][x], 7); grid[y][x] = null; n++; }
+    if (grid[y][x]) { burst(x, y, col(grid[y][x]), 7); grid[y][x] = null; n++; }
   }
   burst(cx, cy, '#ffffff', 30);
   rings.push({ x: cx * CELL + CELL / 2, y: cy * CELL + CELL / 2, r: 4, life: 1, color: '#bff6ff' });
@@ -247,7 +267,7 @@ function clearLines() {
   for (let r = 0; r < ROWS; r++) if (grid[r].every(Boolean)) full.push(r);
   const n = full.length;
   if (!n) { combo = -1; hud(); return; }
-  for (const r of full) for (let c = 0; c < COLS; c++) burst(c, r, grid[r][c], 6);
+  for (const r of full) for (let c = 0; c < COLS; c++) burst(c, r, col(grid[r][c]), 6);
   grid = grid.filter((_, r) => !full.includes(r));
   while (grid.length < ROWS) grid.unshift(Array(COLS).fill(null));
   combo++;
@@ -267,6 +287,7 @@ function clearLines() {
     popText(`→ SECTOR ${level}`, H / 2 - 60, `hsl(${(220 + (level - 1) * 47) % 360},90%,75%)`, 24);
     warp = 3; [0, 4, 7, 11].forEach((s, i) => tone(SCALE[s] / 2, .35, 'sine', .07, 0, i * .09));
   }
+  nextTheme();
   shake = Math.min(16, 4 + n * 3); warp = Math.max(warp, .4 * n);
   const base = Math.min(combo + 1, 6);
   for (let i = 0; i < n + 1; i++) tone(SCALE[Math.min(base + i * 2, SCALE.length - 1)], .18, 'sine', .07, 0, i * .07);
@@ -276,7 +297,7 @@ function supernova() {
   if (state !== 'play' || nova < 100) return;
   let n = 0;
   for (let r = ROWS - 4; r < ROWS; r++) for (let c = 0; c < COLS; c++)
-    if (grid[r][c]) { burst(c, r, grid[r][c], 9); n++; }
+    if (grid[r][c]) { burst(c, r, col(grid[r][c]), 9); n++; }
   grid.splice(ROWS - 4, 4);
   for (let i = 0; i < 4; i++) grid.unshift(Array(COLS).fill(null));
   while (piece.y > -4 && collide(piece.m, piece.x, piece.y)) piece.y--;
@@ -285,10 +306,16 @@ function supernova() {
   for (let i = 0; i < 3; i++) rings.push({ x: W / 2, y: H - 2 * CELL, r: 4 + i * 30, life: 1, color: ['#fff', '#ffe066', '#ff6ad5'][i] });
   popText('SUPERNOVA!', H - 6 * CELL, '#ffe066', 30);
   popText(`+${pts}`, H - 5 * CELL, '#fff', 16);
+  nextTheme();
   shake = 22; warp = 4;
   noise(.8, .4); tone(60, .9, 'sawtooth', .08, 8);
   [0, 2, 4, 7, 9, 11].forEach((s, i) => tone(SCALE[s], .3, 'triangle', .05, 0, .1 + i * .06));
   hud();
+}
+function nextTheme() {
+  themeIdx = (themeIdx + 1) % THEMES.length; theme = THEMES[themeIdx];
+  themeFlash = 1; drawMinis();
+  popText(`◐ ${theme.name.toUpperCase()}`, 36, theme.colors.T, 14);
 }
 function gameOver() {
   state = 'over';
@@ -307,6 +334,7 @@ function hud() {
   $('best').textContent = Math.max(best, score).toLocaleString();
   $('level').textContent = level; $('lines').textContent = lines;
   $('combo').textContent = combo > 0 ? '×' + (combo + 1) : '–';
+  $('theme').textContent = theme.name; $('theme').style.color = theme.colors.T;
   $('novaFill').style.width = nova + '%';
   $('novaBox').classList.toggle('ready', nova >= 100);
   $('novaHint').textContent = nova >= 100 ? 'READY — press E' : 'clear lines to charge';
@@ -319,16 +347,62 @@ function togglePause() {
 
 // ---------- drawing ----------
 function rr(c, x, y, w, h, r) { c.beginPath(); if (c.roundRect) c.roundRect(x, y, w, h, r); else c.rect(x, y, w, h); }
-function drawCell(c, px, py, s, col, a = 1) {
-  c.globalAlpha = a;
-  c.fillStyle = col; c.shadowColor = col; c.shadowBlur = s * .4;
-  rr(c, px + s * .07, py + s * .07, s * .86, s * .86, s * .2); c.fill();
-  c.shadowBlur = 0;
-  c.fillStyle = 'rgba(255,255,255,.38)';
-  rr(c, px + s * .18, py + s * .16, s * .64, s * .2, s * .1); c.fill();
-  c.fillStyle = 'rgba(0,0,30,.18)';
-  rr(c, px + s * .18, py + s * .66, s * .64, s * .16, s * .08); c.fill();
-  c.globalAlpha = 1;
+function drawCell(c, px, py, s, col, a = 1, style = theme.style) {
+  c.save(); c.globalAlpha = a;
+  const x = px + s * .07, y = py + s * .07, w = s * .86;
+  switch (style) {
+    case 'ember': { // molten core glowing out to charred edges
+      const g = c.createRadialGradient(x + w / 2, y + w / 2, 0, x + w / 2, y + w / 2, w * .75);
+      g.addColorStop(0, '#fff6c2'); g.addColorStop(.35, col); g.addColorStop(1, shade(col, -.6));
+      c.fillStyle = g; c.shadowColor = col; c.shadowBlur = s * .5; rr(c, x, y, w, w, s * .12); c.fill();
+      break;
+    }
+    case 'glass': { // translucent ice with shine streaks
+      c.fillStyle = col; c.globalAlpha = a * .28; rr(c, x, y, w, w, s * .14); c.fill();
+      c.globalAlpha = a; c.strokeStyle = col; c.lineWidth = 1.5; c.shadowColor = col; c.shadowBlur = s * .3; c.stroke();
+      c.shadowBlur = 0; c.strokeStyle = 'rgba(255,255,255,.75)'; c.lineWidth = 2; c.beginPath();
+      c.moveTo(x + w * .2, y + w * .55); c.lineTo(x + w * .55, y + w * .2);
+      c.moveTo(x + w * .42, y + w * .72); c.lineTo(x + w * .72, y + w * .42); c.stroke();
+      break;
+    }
+    case 'wire': { // neon outline with a lit core
+      c.strokeStyle = col; c.lineWidth = 2; c.shadowColor = col; c.shadowBlur = s * .5;
+      rr(c, x + 1, y + 1, w - 2, w - 2, s * .08); c.stroke();
+      c.fillStyle = col; c.fillRect(x + w * .36, y + w * .36, w * .28, w * .28);
+      break;
+    }
+    case 'stripe': { // candy with diagonal stripes
+      c.fillStyle = col; c.shadowColor = col; c.shadowBlur = s * .25; rr(c, x, y, w, w, s * .3); c.fill();
+      c.shadowBlur = 0; c.clip(); c.strokeStyle = 'rgba(255,255,255,.5)'; c.lineWidth = s * .12; c.beginPath();
+      for (let k = 0; k < w * 2.2; k += s * .32) { c.moveTo(x + k, y); c.lineTo(x + k - w, y + w); }
+      c.stroke();
+      break;
+    }
+    case 'pixel': { // flat 8-bit bevel
+      const b = s * .14;
+      c.fillStyle = col; c.fillRect(x, y, w, w);
+      c.fillStyle = shade(col, .55); c.fillRect(x, y, w, b); c.fillRect(x, y, b, w);
+      c.fillStyle = shade(col, -.5); c.fillRect(x, y + w - b, w, b); c.fillRect(x + w - b, y, b, w);
+      break;
+    }
+    case 'metal': { // polished gold
+      const g = c.createLinearGradient(x, y, x + w, y + w);
+      g.addColorStop(0, shade(col, .7)); g.addColorStop(.45, col); g.addColorStop(.55, shade(col, -.35)); g.addColorStop(1, shade(col, .25));
+      c.fillStyle = g; c.shadowColor = col; c.shadowBlur = s * .3; rr(c, x, y, w, w, s * .1); c.fill();
+      c.shadowBlur = 0; c.strokeStyle = shade(col, -.5); c.lineWidth = 1; c.stroke();
+      break;
+    }
+    default: { // glossy starlight
+      c.fillStyle = col; c.shadowColor = col; c.shadowBlur = s * .4;
+      rr(c, x, y, w, w, s * .2); c.fill();
+      c.shadowBlur = 0;
+      c.fillStyle = 'rgba(255,255,255,.38)';
+      rr(c, px + s * .18, py + s * .16, s * .64, s * .2, s * .1); c.fill();
+      c.fillStyle = 'rgba(0,0,30,.18)';
+      rr(c, px + s * .18, py + s * .66, s * .64, s * .16, s * .08); c.fill();
+    }
+  }
+  c.restore();
 }
 function drawComet(c, px, py, s, t, tail = true) {
   const cx = px + s / 2, cy = py + s / 2, pulse = 1 + Math.sin(t / 120) * .12;
@@ -347,7 +421,7 @@ function drawComet(c, px, py, s, t, tail = true) {
 }
 function drawPieceAt(c, type, m, ox, oy, s, t) {
   for (let r = 0; r < m.length; r++) for (let k = 0; k < m[r].length; k++)
-    if (m[r][k]) type === 'C' ? drawComet(c, ox + k * s, oy + r * s, s, t, false) : drawCell(c, ox + k * s, oy + r * s, s, COLORS[type]);
+    if (m[r][k]) type === 'C' ? drawComet(c, ox + k * s, oy + r * s, s, t, false) : drawCell(c, ox + k * s, oy + r * s, s, col(type));
 }
 function bounds(m) {
   let x0 = 9, x1 = -1, y0 = 9, y1 = -1;
@@ -361,7 +435,7 @@ function drawMiniPiece(c, type, cx, cy, s, t, dim) {
   for (let r = 0; r < m.length; r++) for (let k = 0; k < m[r].length; k++) {
     if (!m[r][k]) continue;
     const px = cx - b.w * s / 2 + (k - b.x0) * s, py = cy - b.h * s / 2 + (r - b.y0) * s;
-    type === 'C' ? drawComet(c, px, py, s, t, false) : drawCell(c, px, py, s, COLORS[type], save);
+    type === 'C' ? drawComet(c, px, py, s, t, false) : drawCell(c, px, py, s, col(type), save);
   }
   c.globalAlpha = 1;
 }
@@ -376,15 +450,16 @@ function render(t) {
   ctx.save();
   ctx.clearRect(0, 0, W, H);
   if (shake > .3) ctx.translate((Math.random() - .5) * shake, (Math.random() - .5) * shake);
+  ctx.fillStyle = theme.board; ctx.fillRect(0, 0, W, H);
   // star-dust grid
   ctx.fillStyle = 'rgba(255,255,255,.07)';
   for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) ctx.fillRect(c * CELL + CELL / 2 - 1, r * CELL + CELL / 2 - 1, 2, 2);
   if (grid) {
     for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++)
-      if (grid[r][c]) drawCell(ctx, c * CELL, r * CELL, CELL, grid[r][c], .82 + .18 * Math.sin(t / 500 + r * 1.7 + c * 2.3));
+      if (grid[r][c]) drawCell(ctx, c * CELL, r * CELL, CELL, col(grid[r][c]), .82 + .18 * Math.sin(t / 500 + r * 1.7 + c * 2.3));
     if (piece && (state === 'play' || state === 'pause')) {
       let gy = piece.y; while (!collide(piece.m, piece.x, gy + 1)) gy++;
-      const col = COLORS[piece.type];
+      const pc = col(piece.type);
       if (piece.type === 'C') {
         // blast radius preview
         ctx.fillStyle = 'rgba(160,240,255,.12)'; ctx.strokeStyle = 'rgba(160,240,255,.4)'; ctx.lineWidth = 1;
@@ -397,7 +472,7 @@ function render(t) {
         }
         drawComet(ctx, piece.x * CELL, piece.y * CELL, CELL, t);
       } else {
-        ctx.strokeStyle = col; ctx.globalAlpha = .4; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
+        ctx.strokeStyle = pc; ctx.globalAlpha = .4; ctx.lineWidth = 1.5; ctx.setLineDash([4, 3]);
         for (let r = 0; r < piece.m.length; r++) for (let c = 0; c < piece.m[r].length; c++)
           if (piece.m[r][c] && gy + r >= 0) { rr(ctx, (piece.x + c) * CELL + 3, (gy + r) * CELL + 3, CELL - 6, CELL - 6, 5); ctx.stroke(); }
         ctx.setLineDash([]); ctx.globalAlpha = 1;
@@ -419,6 +494,9 @@ function render(t) {
     ctx.fillText(tx.text, tx.x, tx.y);
   }
   ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+  if (themeFlash > 0) { // colour wash as the theme shifts
+    ctx.globalAlpha = themeFlash * .35; ctx.fillStyle = theme.colors.T; ctx.fillRect(-20, -20, W + 40, H + 40); ctx.globalAlpha = 1;
+  }
   ctx.restore();
 }
 
@@ -432,8 +510,8 @@ function resizeSky() {
 addEventListener('resize', resizeSky); resizeSky();
 function drawSky(dt, t) {
   const w = sky.width, h = sky.height;
-  const target = 220 + ((level || 1) - 1) * 47;
-  hue += (target - hue) * Math.min(1, dt * .002);
+  hue += ((((theme.hue - hue) % 360) + 540) % 360 - 180) * Math.min(1, dt * .003);
+  hue = (hue + 360) % 360;
   document.documentElement.style.setProperty('--hue', (hue % 360).toFixed(0));
   sctx.fillStyle = '#07061a'; sctx.fillRect(0, 0, w, h);
   const blobs = [[.25, .3, 0], [.78, .72, 60], [.6, .15, 120]];
@@ -458,6 +536,7 @@ function drawSky(dt, t) {
 function update(dt) {
   shake *= Math.pow(.004, dt / 1000);
   warp = Math.max(0, warp - dt * .0018);
+  themeFlash = Math.max(0, themeFlash - dt * .002);
   for (let i = parts.length - 1; i >= 0; i--) { const p = parts[i]; p.x += p.vx * dt; p.y += p.vy * dt; p.vy += .0007 * dt; p.life -= p.decay * dt; if (p.life <= 0) parts.splice(i, 1); }
   for (let i = rings.length - 1; i >= 0; i--) { const g = rings[i]; g.r += .45 * dt; g.life -= dt * .0018; if (g.life <= 0) rings.splice(i, 1); }
   for (let i = texts.length - 1; i >= 0; i--) { const x = texts[i]; x.y -= .025 * dt; x.life -= dt * .0007; if (x.life <= 0) texts.splice(i, 1); }
@@ -531,7 +610,8 @@ overlay(`<div class="title">STARDROP</div>
   <div class="sub">stack falling starlight · clear lines to warp<br>through the sectors of the galaxy</div>
   <div class="sub" style="font-size:11px;max-width:240px">
     <span style="color:#bff6ff">☄ Comets</span> sometimes fall — they blast a crater wherever they land.<br>
-    <span style="color:#ffe066">✦ Supernova</span> charges as you clear lines — press <b style="color:#fff">E</b> to vaporize the bottom four rows.
+    <span style="color:#ffe066">✦ Supernova</span> charges as you clear lines — press <b style="color:#fff">E</b> to vaporize the bottom four rows.<br>
+    <span style="color:#5cff9d">◐ Every line</span> you clear shifts the galaxy into a new theme.
   </div>
   <div class="cta">PRESS ENTER / TAP TO LAUNCH</div>`);
 requestAnimationFrame(frame);
